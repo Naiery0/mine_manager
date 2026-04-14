@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import ast; ast.parse\\(open\\('main.py'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('detector.py'\\).read\\(\\)\\); print\\('detector.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('solver.py'\\).read\\(\\)\\); print\\('solver.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('region_selector.py'\\).read\\(\\)\\); print\\('region_selector.py OK'\\)\")",
+      "Bash(python -c ':*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)"
+    ]
+  }
+}
