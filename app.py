@@ -4,16 +4,18 @@
 """
 
 import tkinter as tk
+from tkinter import messagebox
 import threading
 import queue
 import time
+import os
 
 import numpy as np
 import pyautogui
-from PIL import Image, ImageTk, ImageDraw
+from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 from detector import (BoardDetector, UNKNOWN, FLAG, MINE, EMPTY,
-                       REF_SIZE, CAT_NAMES, save_references, load_references)
+                       REF_SIZE, CAT_NAMES, PROFILE_DIR, save_references, load_references)
 from solver import MinesweeperSolver
 
 pyautogui.FAILSAFE = True
@@ -74,8 +76,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("지뢰찾기 자동 풀이")
-        self.geometry("1050x700")
-        self.minsize(820, 560)
+        self.geometry("1100x750")
+        self.minsize(860, 600)
         self.configure(bg=C['bg'])
 
         # 상태
@@ -85,8 +87,12 @@ class App(tk.Tk):
         self.stop_evt    = threading.Event()
         self.board_q     = queue.Queue(maxsize=2)
         self.log_q       = queue.Queue()
-        self._board_cache = None
-        self._cell_ids    = None
+        self._board_cache  = None
+        self._cell_ids     = None
+        self._board_img_id = None   # PIL 렌더링용 캔버스 아이템
+        self._board_photo  = None   # PhotoImage GC 방지
+        self._board_font   = None   # PIL 폰트 캐시
+        self._board_font_size = 0
 
         # 학습 모드 상태
         self._learning       = False
@@ -105,10 +111,35 @@ class App(tk.Tk):
 
     # ── UI 구성 ─────────────────────────────────────────────────────
     def _build_ui(self):
-        # ── 왼쪽 패널 ──────────────────────────────
-        L = tk.Frame(self, bg=C['panel'], width=260)
-        L.pack(side='left', fill='y')
-        L.pack_propagate(False)
+        # ── 왼쪽 패널 (스크롤 가능) ──────────────────
+        L_outer = tk.Frame(self, bg=C['panel'], width=270)
+        L_outer.pack(side='left', fill='y')
+        L_outer.pack_propagate(False)
+
+        _lsb = tk.Scrollbar(L_outer, orient='vertical', bg=C['panel'],
+                            troughcolor=C['trough'], width=8)
+        _lsb.pack(side='right', fill='y')
+
+        _lcanvas = tk.Canvas(L_outer, bg=C['panel'], highlightthickness=0,
+                             yscrollcommand=_lsb.set)
+        _lcanvas.pack(side='left', fill='both', expand=True)
+        _lsb.config(command=_lcanvas.yview)
+
+        L = tk.Frame(_lcanvas, bg=C['panel'])
+        _win = _lcanvas.create_window((0, 0), window=L, anchor='nw')
+
+        def _on_frame_configure(e):
+            _lcanvas.configure(scrollregion=_lcanvas.bbox('all'))
+        def _on_canvas_configure(e):
+            _lcanvas.itemconfig(_win, width=e.width)
+        def _on_mousewheel(e):
+            _lcanvas.yview_scroll(int(-1 * (e.delta / 120)), 'units')
+
+        L.bind('<Configure>', _on_frame_configure)
+        _lcanvas.bind('<Configure>', _on_canvas_configure)
+        _lcanvas.bind('<Enter>', lambda e: _lcanvas.bind_all('<MouseWheel>', _on_mousewheel))
+        _lcanvas.bind('<Leave>', lambda e: _lcanvas.unbind_all('<MouseWheel>'))
+
         self._left_panel = L
 
         def section(text):
@@ -213,6 +244,10 @@ class App(tk.Tk):
         self.learn_status_lbl.pack(anchor='w', padx=14)
         self._update_learn_status()
 
+        self.learn_reset_btn = self._flat_btn(L, "학습 초기화", self._reset_learn_data,
+                                              bg='#DC2626', hover='#B91C1C')
+        self.learn_reset_btn.pack(fill='x', padx=10, pady=(2, 0))
+
         # 제어
         section("제어")
         br = tk.Frame(L, bg=C['panel'])
@@ -296,6 +331,25 @@ class App(tk.Tk):
         else:
             self.learn_status_lbl.config(text="학습 데이터 없음")
 
+    def _reset_learn_data(self):
+        if not self._saved_refs:
+            self._log("초기화할 학습 데이터가 없습니다")
+            return
+        if not messagebox.askyesno("학습 초기화",
+                                   "저장된 학습 데이터를 모두 삭제합니다.\n계속하시겠습니까?",
+                                   icon='warning'):
+            return
+        path = os.path.join(PROFILE_DIR, 'default.npz')
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception as e:
+            self._log(f"파일 삭제 오류: {e}")
+            return
+        self._saved_refs = None
+        self._update_learn_status()
+        self._log("학습 데이터가 초기화되었습니다")
+
     def _enter_learn_mode(self):
         if not self.region:
             self._log("영역을 먼저 선택하세요")
@@ -304,6 +358,9 @@ class App(tk.Tk):
         self._learning = True
         self._learn_refs = {}
         self._learn_labeled = {}
+        self._learn_cell_norms = {}   # {(r,c): (state, norm_array)}
+        self._learn_base_refs = {state: list(imgs) for state, imgs in self._saved_refs.items()} \
+                                if self._saved_refs else {}
         self._learn_label = UNKNOWN
         self._learn_label_var.set(UNKNOWN)
 
@@ -326,7 +383,13 @@ class App(tk.Tk):
 
         # 캔버스 클릭 바인딩
         self.canvas.bind('<ButtonPress-1>', self._on_learn_click)
-        self._log("학습 모드: 라벨을 선택하고 해당 셀을 클릭하세요")
+        self.canvas.bind('<ButtonPress-3>', self._on_learn_right_click)
+
+        if self._learn_base_refs:
+            existing = sum(len(v) for v in self._learn_base_refs.values())
+            self._log(f"학습 모드: 기존 데이터 {existing}개 + 현재 세션 추가 (우클릭=선택 취소)")
+        else:
+            self._log("학습 모드: 라벨을 선택하고 클릭하세요 (우클릭=선택 취소)")
 
     def _show_learn_canvas(self):
         """학습 모드 캔버스: 보드 이미지 + 그리드 + 라벨 표시."""
@@ -398,10 +461,16 @@ class App(tk.Tk):
 
         # 카운트 업데이트
         parts = []
+        base_refs = getattr(self, '_learn_base_refs', {})
         for state, name, _ in LEARN_LABELS:
-            cnt = len(self._learn_refs.get(state, []))
-            if cnt > 0:
-                parts.append(f"{name}: {cnt}")
+            base_cnt = len(base_refs.get(state, []))
+            sess_cnt = len(self._learn_refs.get(state, []))
+            total = base_cnt + sess_cnt
+            if total > 0:
+                if base_cnt > 0:
+                    parts.append(f"{name}: +{sess_cnt} (총 {total})")
+                else:
+                    parts.append(f"{name}: {sess_cnt}")
         self.learn_count_lbl.config(text='\n'.join(parts) if parts else "셀을 클릭해 라벨링하세요")
 
     def _set_learn_label(self, state):
@@ -441,12 +510,54 @@ class App(tk.Tk):
         pil = Image.fromarray(cell)
         norm = np.array(pil.resize(REF_SIZE, Image.LANCZOS))
 
+        # 이미 라벨된 셀이면 기존 ref 제거
+        if (row, col) in self._learn_labeled:
+            old_state, old_norm = self._learn_cell_norms.get((row, col), (None, None))
+            if old_state is not None and old_state in self._learn_refs:
+                ref_list = self._learn_refs[old_state]
+                for i, ref in enumerate(ref_list):
+                    if np.array_equal(ref, old_norm):
+                        ref_list.pop(i)
+                        break
+
         state = self._learn_label
         if state not in self._learn_refs:
             self._learn_refs[state] = []
         self._learn_refs[state].append(norm)
         self._learn_labeled[(row, col)] = state
+        self._learn_cell_norms[(row, col)] = (state, norm)
 
+        self._redraw_learn_labels()
+
+    def _on_learn_right_click(self, event):
+        """학습 모드 우클릭: 해당 셀 라벨 선택 취소."""
+        if not self._learning or not self._learn_display:
+            return
+        x0, y0, scale, rows, cols = self._learn_display
+        sw, sh = self._learn_img.shape[1], self._learn_img.shape[0]
+        dw, dh = int(sw * scale), int(sh * scale)
+
+        rx = event.x - x0
+        ry = event.y - y0
+        if rx < 0 or ry < 0 or rx >= dw or ry >= dh:
+            return
+
+        col = int(rx / (dw / cols))
+        row = int(ry / (dh / rows))
+        if row < 0 or row >= rows or col < 0 or col >= cols:
+            return
+
+        if (row, col) not in self._learn_labeled:
+            return
+
+        old_state, old_norm = self._learn_cell_norms.pop((row, col), (None, None))
+        if old_state is not None and old_state in self._learn_refs:
+            ref_list = self._learn_refs[old_state]
+            for i, ref in enumerate(ref_list):
+                if np.array_equal(ref, old_norm):
+                    ref_list.pop(i)
+                    break
+        del self._learn_labeled[(row, col)]
         self._redraw_learn_labels()
 
     def _finish_learn(self):
@@ -455,17 +566,21 @@ class App(tk.Tk):
             self._log("라벨링된 셀이 없습니다")
             return
 
-        # 저장
-        save_references(self._learn_refs)
-        self._saved_refs = self._learn_refs.copy()
+        # 기존 데이터 + 현재 세션 데이터 병합
+        merged = {state: list(imgs) for state, imgs in (self._learn_base_refs or {}).items()}
+        for state, imgs in self._learn_refs.items():
+            merged.setdefault(state, []).extend(imgs)
+
+        save_references(merged)
+        self._saved_refs = merged
         self._update_learn_status()
 
         parts = []
         for state, name, _ in LEARN_LABELS:
-            cnt = len(self._learn_refs.get(state, []))
+            cnt = len(merged.get(state, []))
             if cnt > 0:
                 parts.append(f"{name} {cnt}")
-        self._log(f"학습 완료: {', '.join(parts)}")
+        self._log(f"학습 완료 (누적): {', '.join(parts)}")
 
         self._exit_learn_mode()
 
@@ -477,6 +592,7 @@ class App(tk.Tk):
         self._learning = False
         self._learn_frame.pack_forget()
         self.canvas.unbind('<ButtonPress-1>')
+        self.canvas.unbind('<ButtonPress-3>')
         self.learn_btn.config(state='normal')
         self.region_btn.config(state='normal')
         if self.region:
@@ -644,9 +760,26 @@ class App(tk.Tk):
         self.learn_btn.config(state='disabled')
         self._log(f"시작: {rows}행×{cols}열, 지뢰{mines}개")
 
+        try:
+            detector = BoardDetector(self.region, rows, cols,
+                                     references=self._saved_refs)
+            solver = MinesweeperSolver(rows, cols, mines)
+        except Exception as e:
+            self._log(f"초기화 오류: {e}")
+            self._set_idle()
+            return
+
+        mode = "레퍼런스" if self._saved_refs else "베이스라인"
+        self._log(f"준비 완료 ({mode} 모드) — 풀이 시작")
+
+        # 디스플레이 스레드: 보드 시각화 전담 (~15 FPS 캡처)
+        threading.Thread(target=self._display_loop,
+                         args=(detector,), daemon=True).start()
+
+        # 게임 스레드: 풀이 + 클릭 전담
         self.worker = threading.Thread(
             target=self._game_loop,
-            args=(rows, cols, mines),
+            args=(detector, solver, rows, cols, mines),
             daemon=True)
         self.worker.start()
 
@@ -661,24 +794,33 @@ class App(tk.Tk):
         self.region_btn.config(state='normal')
         self.learn_btn.config(state='normal')
 
-    # ── 게임 루프 ────────────────────────────────────────────────
-    def _game_loop(self, rows, cols, mines):
-        self._log("보드 분석 중...")
-        try:
-            detector = BoardDetector(self.region, rows, cols,
-                                     references=self._saved_refs)
-            solver = MinesweeperSolver(rows, cols, mines)
-        except Exception as e:
-            self._log(f"초기화 오류: {e}")
-            self.after(0, self._set_idle)
-            return
+    # ── 디스플레이 루프 (보드 시각화 전담) ──────────────────────
+    def _display_loop(self, detector):
+        """~15 FPS로 보드를 캡처해 UI 큐에 푸시. 게임 루프와 독립 동작."""
+        while not self.stop_evt.is_set():
+            try:
+                board = detector.capture_board()
+                # 큐가 찼으면 오래된 것 버리고 최신으로 교체
+                try:
+                    self.board_q.put_nowait(board)
+                except queue.Full:
+                    try:
+                        self.board_q.get_nowait()
+                        self.board_q.put_nowait(board)
+                    except queue.Empty:
+                        pass
+            except Exception:
+                pass
+            time.sleep(0.067)   # ~15 FPS
 
-        mode = "레퍼런스" if self._saved_refs else "베이스라인"
-        self._log(f"준비 완료 ({mode} 모드) — 풀이 시작")
-
+    # ── 게임 루프 (풀이 + 클릭 전담) ────────────────────────────
+    def _game_loop(self, detector, solver, rows, cols, mines):
         move_count   = 0
         stall_count  = 0
         prev_unknown = rows * cols
+        # detector가 FLAG를 UNKNOWN으로 오인식해도 깃발이 토글되지 않도록
+        # 직접 꽂은 깃발 위치를 추적하고, 매 캡처 후 강제로 FLAG로 덮어씀
+        own_flags: set = set()
 
         while not self.stop_evt.is_set():
             try:
@@ -690,8 +832,9 @@ class App(tk.Tk):
                 self._log(f"캡처 오류: {e}")
                 break
 
-            try: self.board_q.put_nowait(board)
-            except queue.Full: pass
+            # 직접 꽂은 깃발을 detector 오인식에 상관없이 FLAG로 유지
+            for fr, fc in own_flags:
+                board[fr][fc] = FLAG
 
             unknown_cnt = sum(c == UNKNOWN for row in board for c in row)
             flag_cnt    = sum(c == FLAG    for row in board for c in row)
@@ -729,9 +872,12 @@ class App(tk.Tk):
             try:
                 for r, c in mine_cells:
                     if self.stop_evt.is_set(): break
-                    if board[r][c] == UNKNOWN:
+                    # 이미 자체 추적 중인 깃발은 다시 우클릭하지 않음 (토글 방지)
+                    if board[r][c] == UNKNOWN and (r, c) not in own_flags:
                         x, y = detector.cell_center(r, c)
                         pyautogui.rightClick(x, y)
+                        own_flags.add((r, c))
+                        board[r][c] = FLAG  # 같은 iteration 내 반영
                         move_count += 1
                         time.sleep(delay * 0.35)
 
@@ -751,6 +897,8 @@ class App(tk.Tk):
 
             try:
                 new_board = detector.capture_board()
+                for fr, fc in own_flags:
+                    new_board[fr][fc] = FLAG
                 new_unknown = sum(c == UNKNOWN for row in new_board for c in row)
                 if new_unknown >= prev_unknown and not mine_cells:
                     stall_count += 1
@@ -770,37 +918,15 @@ class App(tk.Tk):
     # ═══════════════════════════════════════════════════════════════
 
     def _redraw(self):
-        self._cell_ids = None
+        self._cell_ids     = None
+        self._board_img_id = None   # 캔버스 리사이즈 시 이미지 아이템 재생성
         if self._learning:
             self._show_learn_canvas()
         elif self._board_cache:
             self._draw_board(self._board_cache)
 
-    def _init_cells(self, rows, cols):
-        self.canvas.delete('all')
-        cw = self.canvas.winfo_width()
-        ch = self.canvas.winfo_height()
-        cw_cell = cw / cols
-        ch_cell = ch / rows
-        fs = max(6, int(min(cw_cell, ch_cell) * 0.52))
-
-        ids = []
-        for r in range(rows):
-            row_ids = []
-            for c in range(cols):
-                x1, y1 = c * cw_cell, r * ch_cell
-                x2, y2 = x1 + cw_cell, y1 + ch_cell
-                rid = self.canvas.create_rectangle(x1, y1, x2, y2,
-                          fill='#CBD5E1', outline='#E2E8F0', width=1)
-                tid = self.canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2,
-                          text='', fill='#1F2937',
-                          font=(FONT, fs, 'bold'))
-                row_ids.append((rid, tid, None))
-            ids.append(row_ids)
-        self._cell_ids = ids
-        self._cell_grid = (rows, cols)
-
     def _draw_board(self, board):
+        """PIL로 전체 보드를 단일 이미지로 렌더링 → canvas에 1회 업데이트."""
         self._board_cache = board
         rows = len(board)
         if not rows: return
@@ -811,38 +937,75 @@ class App(tk.Tk):
         ch = self.canvas.winfo_height()
         if cw < 10 or ch < 10: return
 
-        if self._cell_ids is None or self._cell_grid != (rows, cols):
-            self._init_cells(rows, cols)
+        cell_w = cw / cols
+        cell_h = ch / rows
+        fs = max(8, int(min(cell_w, cell_h) * 0.46))
+
+        # 폰트 캐시 (크기 바뀔 때만 재로드)
+        if self._board_font is None or self._board_font_size != fs:
+            for path in ('arial.ttf',
+                         'C:/Windows/Fonts/arial.ttf',
+                         'C:/Windows/Fonts/segoeui.ttf'):
+                try:
+                    self._board_font = ImageFont.truetype(path, fs)
+                    break
+                except Exception:
+                    pass
+            else:
+                self._board_font = ImageFont.load_default()
+            self._board_font_size = fs
+
+        font = self._board_font
+        img  = Image.new('RGB', (cw, ch), '#F3F4F6')
+        draw = ImageDraw.Draw(img)
 
         for r in range(rows):
             for c in range(cols):
                 state = board[r][c]
-                rid, tid, last = self._cell_ids[r][c]
-                if state == last:
-                    continue
+                x1 = int(c * cell_w)
+                y1 = int(r * cell_h)
+                x2 = int((c + 1) * cell_w) - 1
+                y2 = int((r + 1) * cell_h) - 1
 
                 if state in CELL_FILL:
-                    fill = CELL_FILL[state]
-                    text = {FLAG: 'F', MINE: 'X'}.get(state, '')
-                    tcolor = '#1F2937' if state == UNKNOWN or state == EMPTY else '#FFFFFF'
+                    fill   = CELL_FILL[state]
+                    text   = {FLAG: 'F', MINE: 'X'}.get(state, '')
+                    tcolor = '#FFFFFF' if state in (FLAG, MINE) else '#94A3B8'
                 else:
                     fill   = '#FFFFFF'
                     text   = str(state)
                     tcolor = NUM_COLOR.get(state, '#1F2937')
 
-                self.canvas.itemconfig(rid, fill=fill)
-                self.canvas.itemconfig(tid, text=text, fill=tcolor)
-                self._cell_ids[r][c] = (rid, tid, state)
+                draw.rectangle([x1, y1, x2, y2], fill=fill, outline='#E2E8F0')
 
-    # ── 큐 폴링 ──────────────────────────────────────────────────
+                if text:
+                    try:
+                        bb = draw.textbbox((0, 0), text, font=font)
+                        tw, th = bb[2] - bb[0], bb[3] - bb[1]
+                    except AttributeError:
+                        tw, th = draw.textsize(text, font=font)
+                    tx = x1 + (x2 - x1 - tw) // 2
+                    ty = y1 + (y2 - y1 - th) // 2
+                    draw.text((tx, ty), text, fill=tcolor, font=font)
+
+        photo = ImageTk.PhotoImage(img)
+        if self._board_img_id is None:
+            self._board_img_id = self.canvas.create_image(0, 0, image=photo, anchor='nw')
+        else:
+            self.canvas.itemconfig(self._board_img_id, image=photo)
+        self._board_photo = photo   # GC 방지
+
+    # ── 큐 폴링 (~60 FPS) ────────────────────────────────────────
     def _poll(self):
+        # 큐에 쌓인 보드 중 최신 것만 그리기
+        board = None
         try:
             while True:
                 board = self.board_q.get_nowait()
-                if not self._learning:
-                    self._draw_board(board)
         except queue.Empty:
             pass
+        if board is not None and not self._learning:
+            self._draw_board(board)
 
         try:
             while True:
@@ -854,7 +1017,7 @@ class App(tk.Tk):
         except queue.Empty:
             pass
 
-        self.after(50, self._poll)
+        self.after(16, self._poll)   # ~60 FPS
 
     def _log(self, msg):
         self.log_q.put(msg)

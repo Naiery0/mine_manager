@@ -231,15 +231,21 @@ class BoardDetector:
                     best_mse   = mse
                     best_state = state
 
-        # 공개됨/지뢰로 분류된 경우에도 숫자 세부 감지로 보정
-        # (학습 데이터가 부족하거나 잘못 라벨된 경우 숫자가 지뢰로 오인되는 문제 완화)
-        if best_state in (EMPTY, MINE):
-            interior = self._interior(img, row, col)
+        interior = self._interior(img, row, col)
+
+        if best_state == EMPTY:
+            # 공개된 셀 → 숫자 세부 감지
             if interior.size > 0:
+                return self._detect_number(interior)
+
+        elif best_state == MINE:
+            # 레퍼런스가 MINE으로 분류했더라도 실제 지뢰처럼 보이지 않으면
+            # 숫자로 오인식된 케이스 (특히 5번: 마룬 r=128, 임계값 r>150 불통과)
+            # _is_mine_icon: 빨간 배경(red_ratio>0.01) + 어두운 아이콘(dark_ratio>0.12)
+            # 숫자 5 셀은 red_ratio≈0 → False → 숫자 감지로 폴백
+            if interior.size > 0 and not self._is_mine_icon(interior):
                 detail = self._detect_number(interior)
                 if 1 <= detail <= 8:
-                    return detail
-                if best_state == EMPTY:
                     return detail
 
         return best_state
