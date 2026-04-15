@@ -7,7 +7,9 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('region_selector.py'\\).read\\(\\)\\); print\\('region_selector.py OK'\\)\")",
       "Bash(python -c ':*)",
       "Bash(python:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(python skills/ui-ux-pro-max/scripts/search.py \"utility tool desktop game manager bright clean\" --design-system -p \"지뢰찾기 매니저\")",
+      "Bash(python3 skills/ui-ux-pro-max/scripts/search.py \"utility tool desktop game manager bright clean\" --design-system -p \"지뢰찾기 매니저\")"
     ]
   }
 }

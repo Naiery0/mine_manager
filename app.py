@@ -19,17 +19,41 @@ from solver import MinesweeperSolver
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.02
 
-# ── 시각화 색상 ──────────────────────────────────────────────────
+# ── 폰트 ──────────────────────────────────────────────────────────────
+FONT = 'Pretendard'
+
+# ── 색상 팔레트 ───────────────────────────────────────────────────────
+C = {
+    'bg':        '#F5F6FA',   # 앱 배경
+    'panel':     '#FFFFFF',   # 왼쪽 패널
+    'header_bg': '#2563EB',   # 헤더 배경
+    'header_fg': '#FFFFFF',   # 헤더 글자
+    'sec_fg':    '#374151',   # 섹션 제목
+    'divider':   '#E5E7EB',   # 구분선
+    'body':      '#1F2937',   # 본문 글자
+    'secondary': '#6B7280',   # 보조 글자
+    'accent':    '#2563EB',   # 강조 (파란색)
+    'warn':      '#D97706',   # 경고 (주황)
+    'error':     '#DC2626',   # 오류 (빨강)
+    'success':   '#16A34A',   # 성공 (초록)
+    'input_bg':  '#F9FAFB',   # 입력창 배경
+    'canvas_bg': '#F3F4F6',   # 캔버스 배경
+    'log_bg':    '#F9FAFB',   # 로그 배경
+    'radio_sel': '#DBEAFE',   # 라디오버튼 선택색
+    'trough':    '#E5E7EB',   # 슬라이더 홈
+}
+
+# ── 보드 시각화 색상 ──────────────────────────────────────────────────
 CELL_FILL = {
-    UNKNOWN: '#78909c',
-    FLAG:    '#e64a19',
-    MINE:    '#b71c1c',
-    EMPTY:   '#cfd8dc',
+    UNKNOWN: '#CBD5E1',
+    FLAG:    '#EF4444',
+    MINE:    '#991B1B',
+    EMPTY:   '#F1F5F9',
 }
 NUM_COLOR = {
-    1: '#1565c0', 2: '#2e7d32', 3: '#c62828',
-    4: '#1a237e', 5: '#880e4f', 6: '#006064',
-    7: '#37474f', 8: '#757575',
+    1: '#1D4ED8', 2: '#15803D', 3: '#DC2626',
+    4: '#1E3A8A', 5: '#7C3AED', 6: '#0E7490',
+    7: '#374151', 8: '#6B7280',
 }
 PRESETS = [
     ('초급',  9,  9,  10),
@@ -37,12 +61,11 @@ PRESETS = [
     ('고급',  16, 30,  99),
 ]
 
-# 학습 라벨 정의
 LEARN_LABELS = [
-    (UNKNOWN, '미확인', '#78909c'),
-    (EMPTY,   '공개됨', '#cfd8dc'),
-    (FLAG,    '깃발',  '#e64a19'),
-    (MINE,    '지뢰',  '#b71c1c'),
+    (UNKNOWN, '미확인', '#CBD5E1'),
+    (EMPTY,   '공개됨', '#F1F5F9'),
+    (FLAG,    '깃발',  '#EF4444'),
+    (MINE,    '지뢰',  '#991B1B'),
 ]
 
 
@@ -51,9 +74,9 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("지뢰찾기 자동 풀이")
-        self.geometry("900x600")
-        self.minsize(720, 480)
-        self.configure(bg='#263238')
+        self.geometry("1050x700")
+        self.minsize(820, 560)
+        self.configure(bg=C['bg'])
 
         # 상태
         self.region      = None
@@ -83,18 +106,19 @@ class App(tk.Tk):
     # ── UI 구성 ─────────────────────────────────────────────────────
     def _build_ui(self):
         # ── 왼쪽 패널 ──────────────────────────────
-        L = tk.Frame(self, bg='#37474f', width=230)
+        L = tk.Frame(self, bg=C['panel'], width=260)
         L.pack(side='left', fill='y')
         L.pack_propagate(False)
         self._left_panel = L
 
         def section(text):
-            tk.Label(L, text=text, bg='#37474f', fg='#80cbc4',
-                     font=('Arial', 8, 'bold')).pack(anchor='w', padx=12, pady=(10,2))
-            tk.Frame(L, height=1, bg='#546e7a').pack(fill='x', padx=8)
+            tk.Label(L, text=text, bg=C['panel'], fg=C['sec_fg'],
+                     font=(FONT, 9, 'bold')).pack(anchor='w', padx=14, pady=(12, 2))
+            tk.Frame(L, height=1, bg=C['divider']).pack(fill='x', padx=10)
 
-        tk.Label(L, text="지뢰찾기 자동풀이", bg='#2e3f47', fg='#eceff1',
-                 font=('Arial', 12, 'bold'), pady=10).pack(fill='x')
+        # 헤더
+        tk.Label(L, text="지뢰찾기 자동풀이", bg=C['header_bg'], fg=C['header_fg'],
+                 font=(FONT, 13, 'bold'), pady=12).pack(fill='x')
 
         # 난이도
         section("난이도")
@@ -102,136 +126,137 @@ class App(tk.Tk):
         for name, rows, cols, mines in PRESETS:
             tk.Radiobutton(L, text=f"{name}  {cols}×{rows}  지뢰{mines}",
                            variable=self.diff_var, value=name,
-                           command=lambda r=rows,c=cols,m=mines: self._set_preset(r,c,m),
-                           bg='#37474f', fg='#eceff1', selectcolor='#546e7a',
-                           activebackground='#37474f', activeforeground='#eceff1',
-                           font=('Arial', 9)).pack(anchor='w', padx=12)
+                           command=lambda r=rows, c=cols, m=mines: self._set_preset(r, c, m),
+                           bg=C['panel'], fg=C['body'], selectcolor=C['radio_sel'],
+                           activebackground=C['panel'], activeforeground=C['body'],
+                           font=(FONT, 10)).pack(anchor='w', padx=14)
 
         # 커스텀 입력
         section("커스텀")
-        grid = tk.Frame(L, bg='#37474f')
-        grid.pack(fill='x', padx=12, pady=4)
+        grid = tk.Frame(L, bg=C['panel'])
+        grid.pack(fill='x', padx=14, pady=4)
         self.rows_v  = tk.IntVar(value=16)
         self.cols_v  = tk.IntVar(value=16)
         self.mines_v = tk.IntVar(value=40)
         for i, (lbl, var) in enumerate([('행', self.rows_v), ('열', self.cols_v), ('지뢰', self.mines_v)]):
-            tk.Label(grid, text=lbl+':', bg='#37474f', fg='#cfd8dc',
-                     font=('Arial', 9), width=4, anchor='w').grid(row=i, column=0, sticky='w', pady=1)
+            tk.Label(grid, text=lbl + ':', bg=C['panel'], fg=C['secondary'],
+                     font=(FONT, 10), width=4, anchor='w').grid(row=i, column=0, sticky='w', pady=2)
             tk.Entry(grid, textvariable=var, width=7,
-                     bg='#546e7a', fg='#eceff1', insertbackground='white',
-                     relief='flat', font=('Arial', 9)).grid(row=i, column=1, sticky='w')
+                     bg=C['input_bg'], fg=C['body'], insertbackground=C['body'],
+                     relief='solid', bd=1, font=(FONT, 10)).grid(row=i, column=1, sticky='w')
 
         # 속도
         section("속도")
         self.speed_v = tk.IntVar(value=200)
-        row = tk.Frame(L, bg='#37474f')
-        row.pack(fill='x', padx=12, pady=2)
-        tk.Label(row, text='속도', bg='#37474f', fg='#cfd8dc',
-                 font=('Arial', 8), width=6, anchor='w').pack(side='left')
-        val_lbl = tk.Label(row, text=f"{self.speed_v.get()}ms", bg='#37474f',
-                           fg='#80cbc4', font=('Arial', 8), width=5)
+        row = tk.Frame(L, bg=C['panel'])
+        row.pack(fill='x', padx=14, pady=4)
+        tk.Label(row, text='속도', bg=C['panel'], fg=C['secondary'],
+                 font=(FONT, 9), width=5, anchor='w').pack(side='left')
+        val_lbl = tk.Label(row, text=f"{self.speed_v.get()}ms", bg=C['panel'],
+                           fg=C['accent'], font=(FONT, 9, 'bold'), width=6)
         val_lbl.pack(side='right')
         tk.Scale(row, from_=30, to=800, variable=self.speed_v, orient='horizontal',
-                 bg='#37474f', fg='#eceff1', troughcolor='#546e7a',
+                 bg=C['panel'], fg=C['body'], troughcolor=C['trough'],
                  highlightthickness=0, showvalue=False,
                  command=lambda v, lbl=val_lbl: lbl.config(text=f"{int(float(v))}ms")
                  ).pack(side='left', fill='x', expand=True)
 
         # 영역 선택
         section("게임 영역")
-        self.region_btn = self._flat_btn(L, "🖱  영역 선택  (2클릭)", self._select_region,
-                                         bg='#455a64', hover='#546e7a')
-        self.region_btn.pack(fill='x', padx=8, pady=(6,2))
+        self.region_btn = self._flat_btn(L, "영역 선택 (2클릭)", self._select_region,
+                                         bg='#374151', hover='#1F2937')
+        self.region_btn.pack(fill='x', padx=10, pady=(8, 2))
         tk.Label(L, text="① 그리드 좌상단 클릭  ② 우하단 클릭",
-                 bg='#37474f', fg='#ffb74d', font=('Arial', 7),
-                 wraplength=210).pack(anchor='w', padx=12)
-        self.region_lbl = tk.Label(L, text="선택 안 됨", fg='#ef9a9a', bg='#37474f',
-                                    font=('Arial', 8), wraplength=210)
-        self.region_lbl.pack(anchor='w', padx=12)
-        self._flat_btn(L, "🔍  그리드 미리보기", self._preview_region,
-                       bg='#37474f', hover='#455a64').pack(fill='x', padx=8, pady=(2,0))
+                 bg=C['panel'], fg=C['warn'], font=(FONT, 8),
+                 wraplength=230).pack(anchor='w', padx=14)
+        self.region_lbl = tk.Label(L, text="선택 안 됨", fg=C['error'], bg=C['panel'],
+                                    font=(FONT, 9), wraplength=230)
+        self.region_lbl.pack(anchor='w', padx=14)
+        self._flat_btn(L, "그리드 미리보기", self._preview_region,
+                       bg='#6B7280', hover='#4B5563').pack(fill='x', padx=10, pady=(2, 0))
 
         # ── 학습 ──
         section("학습")
-        self.learn_btn = self._flat_btn(L, "📚  학습 모드", self._enter_learn_mode,
-                                        bg='#4527a0', hover='#5e35b1')
-        self.learn_btn.pack(fill='x', padx=8, pady=(6,2))
+        self.learn_btn = self._flat_btn(L, "학습 모드", self._enter_learn_mode,
+                                        bg='#0284C7', hover='#0369A1')
+        self.learn_btn.pack(fill='x', padx=10, pady=(8, 2))
 
         # 학습 라벨 선택 (처음엔 숨김)
-        self._learn_frame = tk.Frame(L, bg='#37474f')
+        self._learn_frame = tk.Frame(L, bg=C['panel'])
         self._learn_label_var = tk.IntVar(value=UNKNOWN)
         for state, text, color in LEARN_LABELS:
-            f = tk.Frame(self._learn_frame, bg='#37474f')
-            f.pack(fill='x', padx=12, pady=1)
+            f = tk.Frame(self._learn_frame, bg=C['panel'])
+            f.pack(fill='x', padx=14, pady=1)
             tk.Radiobutton(f, text=text, variable=self._learn_label_var, value=state,
                            command=lambda s=state: self._set_learn_label(s),
-                           bg='#37474f', fg='#eceff1', selectcolor='#546e7a',
-                           activebackground='#37474f', activeforeground='#eceff1',
-                           font=('Arial', 9)).pack(side='left')
-            tk.Frame(f, bg=color, width=12, height=12).pack(side='right', padx=4)
+                           bg=C['panel'], fg=C['body'], selectcolor=C['radio_sel'],
+                           activebackground=C['panel'], activeforeground=C['body'],
+                           font=(FONT, 10)).pack(side='left')
+            tk.Frame(f, bg=color, width=12, height=12,
+                     highlightbackground='#D1D5DB', highlightthickness=1).pack(side='right', padx=4)
 
-        self.learn_count_lbl = tk.Label(self._learn_frame, text="", bg='#37474f',
-                                         fg='#b0bec5', font=('Consolas', 7),
-                                         justify='left', wraplength=200)
-        self.learn_count_lbl.pack(anchor='w', padx=12, pady=4)
+        self.learn_count_lbl = tk.Label(self._learn_frame, text="", bg=C['panel'],
+                                         fg=C['secondary'], font=(FONT, 8),
+                                         justify='left', wraplength=220)
+        self.learn_count_lbl.pack(anchor='w', padx=14, pady=4)
 
-        self.learn_done_btn = self._flat_btn(self._learn_frame, "✓  학습 완료", self._finish_learn,
-                                             bg='#2e7d32', hover='#388e3c')
-        self.learn_done_btn.pack(fill='x', padx=8, pady=2)
-        self.learn_cancel_btn = self._flat_btn(self._learn_frame, "✕  취소", self._cancel_learn,
-                                               bg='#546e7a', hover='#607d8b')
-        self.learn_cancel_btn.pack(fill='x', padx=8, pady=(0,4))
-        # 학습 프레임 초기엔 숨김
-        # self._learn_frame.pack(...)  ← _enter_learn_mode에서 표시
+        self.learn_done_btn = self._flat_btn(self._learn_frame, "학습 완료", self._finish_learn,
+                                             bg='#16A34A', hover='#15803D')
+        self.learn_done_btn.pack(fill='x', padx=10, pady=2)
+        self.learn_cancel_btn = self._flat_btn(self._learn_frame, "취소", self._cancel_learn,
+                                               bg='#9CA3AF', hover='#6B7280')
+        self.learn_cancel_btn.pack(fill='x', padx=10, pady=(0, 4))
 
         # 학습 상태
-        self.learn_status_lbl = tk.Label(L, text="", fg='#b39ddb', bg='#37474f',
-                                          font=('Arial', 7), wraplength=210)
-        self.learn_status_lbl.pack(anchor='w', padx=12)
+        self.learn_status_lbl = tk.Label(L, text="", fg=C['accent'], bg=C['panel'],
+                                          font=(FONT, 8), wraplength=230)
+        self.learn_status_lbl.pack(anchor='w', padx=14)
         self._update_learn_status()
 
         # 제어
         section("제어")
-        br = tk.Frame(L, bg='#37474f')
-        br.pack(fill='x', padx=8, pady=6)
-        self.start_btn = self._flat_btn(br, "▶  시작", self._start,
-                                        bg='#00695c', hover='#00897b', state='disabled')
-        self.start_btn.pack(side='left', fill='x', expand=True, padx=(0,2))
-        self.stop_btn  = self._flat_btn(br, "■  정지", self._stop,
-                                        bg='#b71c1c', hover='#e53935', state='disabled')
+        br = tk.Frame(L, bg=C['panel'])
+        br.pack(fill='x', padx=10, pady=8)
+        self.start_btn = self._flat_btn(br, "시작", self._start,
+                                        bg='#16A34A', hover='#15803D', state='disabled')
+        self.start_btn.pack(side='left', fill='x', expand=True, padx=(0, 3))
+        self.stop_btn  = self._flat_btn(br, "정지", self._stop,
+                                        bg='#DC2626', hover='#B91C1C', state='disabled')
         self.stop_btn.pack(side='left', fill='x', expand=True)
 
-        self.status_lbl = tk.Label(L, text="대기 중", fg='#80cbc4', bg='#37474f',
-                                    font=('Consolas', 8), justify='left')
-        self.status_lbl.pack(anchor='w', padx=12, pady=4)
+        self.status_lbl = tk.Label(L, text="대기 중", fg=C['accent'], bg=C['panel'],
+                                    font=(FONT, 9), justify='left')
+        self.status_lbl.pack(anchor='w', padx=14, pady=4)
 
         # ── 오른쪽 패널 ─────────────────────────────
-        R = tk.Frame(self, bg='#263238')
+        R = tk.Frame(self, bg=C['bg'])
         R.pack(side='left', fill='both', expand=True)
 
-        tk.Label(R, text="실시간 보드 인식", bg='#263238', fg='#80cbc4',
-                 font=('Arial', 9)).pack(anchor='w', padx=8, pady=(8,2))
+        tk.Label(R, text="실시간 보드 인식", bg=C['bg'], fg=C['sec_fg'],
+                 font=(FONT, 10, 'bold')).pack(anchor='w', padx=10, pady=(10, 4))
 
-        self.canvas = tk.Canvas(R, bg='#37474f', highlightthickness=0)
-        self.canvas.pack(fill='both', expand=True, padx=8)
+        self.canvas = tk.Canvas(R, bg=C['canvas_bg'], highlightthickness=0)
+        self.canvas.pack(fill='both', expand=True, padx=10)
         self.canvas.bind('<Configure>', lambda _: self._redraw())
 
-        legend = tk.Frame(R, bg='#263238')
-        legend.pack(fill='x', padx=8, pady=(2,0))
-        for color, text in [('#78909c','미확인'), ('#cfd8dc','빈칸'),
-                             ('#eceff1','숫자'), ('#e64a19','깃발'), ('#b71c1c','지뢰')]:
-            tk.Frame(legend, bg=color, width=12, height=12).pack(side='left', padx=(0,2))
-            tk.Label(legend, text=text, bg='#263238', fg='#90a4ae',
-                     font=('Arial', 7)).pack(side='left', padx=(0,8))
+        legend = tk.Frame(R, bg=C['bg'])
+        legend.pack(fill='x', padx=10, pady=(4, 0))
+        for color, text in [('#CBD5E1', '미확인'), ('#F1F5F9', '빈칸'),
+                             ('#FFFFFF', '숫자'), ('#EF4444', '깃발'), ('#991B1B', '지뢰')]:
+            tk.Frame(legend, bg=color, width=12, height=12,
+                     highlightbackground='#D1D5DB', highlightthickness=1).pack(side='left', padx=(0, 2))
+            tk.Label(legend, text=text, bg=C['bg'], fg=C['secondary'],
+                     font=(FONT, 8)).pack(side='left', padx=(0, 10))
 
-        tk.Label(R, text="로그", bg='#263238', fg='#80cbc4',
-                 font=('Arial', 9)).pack(anchor='w', padx=8, pady=(6,2))
+        tk.Label(R, text="로그", bg=C['bg'], fg=C['sec_fg'],
+                 font=(FONT, 10, 'bold')).pack(anchor='w', padx=10, pady=(8, 4))
 
-        lf = tk.Frame(R, bg='#1c2a30')
-        lf.pack(fill='x', padx=8, pady=(0,8))
-        self.log_txt = tk.Text(lf, height=5, state='disabled', bg='#1c2a30', fg='#b0bec5',
-                                font=('Consolas', 8), wrap='word', relief='flat', bd=0)
-        sb = tk.Scrollbar(lf, command=self.log_txt.yview, bg='#263238', troughcolor='#263238')
+        lf = tk.Frame(R, bg=C['log_bg'], bd=1, relief='solid',
+                      highlightbackground=C['divider'], highlightthickness=1)
+        lf.pack(fill='x', padx=10, pady=(0, 10))
+        self.log_txt = tk.Text(lf, height=5, state='disabled', bg=C['log_bg'], fg=C['secondary'],
+                                font=(FONT, 9), wrap='word', relief='flat', bd=0)
+        sb = tk.Scrollbar(lf, command=self.log_txt.yview, bg=C['bg'], troughcolor=C['trough'])
         self.log_txt.config(yscrollcommand=sb.set)
         self.log_txt.pack(side='left', fill='both', expand=True, padx=4, pady=4)
         sb.pack(side='right', fill='y')
@@ -240,9 +265,9 @@ class App(tk.Tk):
     def _flat_btn(self, parent, text, cmd, bg, hover, state='normal'):
         btn = tk.Button(parent, text=text, command=cmd, state=state,
                         bg=bg, fg='white', activebackground=hover, activeforeground='white',
-                        disabledforeground='#546e7a', relief='flat',
-                        font=('Arial', 10, 'bold'), pady=6, bd=0, cursor='hand2')
-        btn.bind('<Enter>', lambda _: btn.config(bg=hover) if btn['state']=='normal' else None)
+                        disabledforeground='#9CA3AF', relief='flat',
+                        font=(FONT, 10, 'bold'), pady=7, bd=0, cursor='hand2')
+        btn.bind('<Enter>', lambda _: btn.config(bg=hover) if btn['state'] == 'normal' else None)
         btn.bind('<Leave>', lambda _: btn.config(bg=bg))
         return btn
 
@@ -335,11 +360,11 @@ class App(tk.Tk):
         cell_dh = dh / rows
         for i in range(1, cols):
             x = x0 + int(i * cell_dw)
-            self.canvas.create_line(x, y0, x, y0 + dh, fill='#ff5722', width=1, tags='grid')
+            self.canvas.create_line(x, y0, x, y0 + dh, fill='#2563EB', width=1, tags='grid')
         for i in range(1, rows):
             y = y0 + int(i * cell_dh)
-            self.canvas.create_line(x0, y, x0 + dw, y, fill='#ff5722', width=1, tags='grid')
-        self.canvas.create_rectangle(x0, y0, x0+dw, y0+dh, outline='#ff5722', width=2, tags='grid')
+            self.canvas.create_line(x0, y, x0 + dw, y, fill='#2563EB', width=1, tags='grid')
+        self.canvas.create_rectangle(x0, y0, x0 + dw, y0 + dh, outline='#2563EB', width=2, tags='grid')
 
         # 라벨된 셀 표시
         self._redraw_learn_labels()
@@ -367,9 +392,9 @@ class App(tk.Tk):
                 fill=color, outline='#ffffff', width=1,
                 stipple='gray50', tags='labels')
             fs = max(6, int(min(cell_dw, cell_dh) * 0.3))
-            self.canvas.create_text((cx1+cx2)/2, (cy1+cy2)/2,
+            self.canvas.create_text((cx1 + cx2) / 2, (cy1 + cy2) / 2,
                 text=label_names.get(state, '?'), fill='white',
-                font=('Arial', fs, 'bold'), tags='labels')
+                font=(FONT, fs, 'bold'), tags='labels')
 
         # 카운트 업데이트
         parts = []
@@ -484,11 +509,11 @@ class App(tk.Tk):
         overlay.overrideredirect(True)
         overlay.geometry(f"{log_w}x{log_h}+0+0")
         overlay.attributes('-topmost', True)
-        overlay.attributes('-alpha', 0.30)
-        overlay.configure(bg='#001030')
+        overlay.attributes('-alpha', 0.25)
+        overlay.configure(bg='#0F172A')
         overlay.update()
 
-        canvas = tk.Canvas(overlay, cursor='crosshair', bg='#001030',
+        canvas = tk.Canvas(overlay, cursor='crosshair', bg='#0F172A',
                            highlightthickness=0)
         canvas.pack(fill='both', expand=True)
 
@@ -497,10 +522,10 @@ class App(tk.Tk):
         guide_id = canvas.create_text(
             log_w // 2, 36,
             text="① 그리드 좌상단 모서리를 클릭하세요   |   ESC: 취소",
-            fill='#ffeb3b', font=('Arial', 14, 'bold'))
+            fill='#FCD34D', font=(FONT, 14, 'bold'))
 
-        hline = canvas.create_line(0, 0, log_w, 0, fill='#ff5722', width=1, dash=(4, 4))
-        vline = canvas.create_line(0, 0, 0, log_h, fill='#ff5722', width=1, dash=(4, 4))
+        hline = canvas.create_line(0, 0, log_w, 0, fill='#2563EB', width=1, dash=(4, 4))
+        vline = canvas.create_line(0, 0, 0, log_h, fill='#2563EB', width=1, dash=(4, 4))
 
         def on_move(e):
             canvas.coords(hline, 0, e.y, log_w, e.y)
@@ -511,14 +536,14 @@ class App(tk.Tk):
                     canvas.delete(state['guide'])
                 state['guide'] = canvas.create_rectangle(
                     x0, y0, e.x, e.y,
-                    outline='#4caf50', width=2, fill='#ffffff', stipple='gray12')
+                    outline='#22C55E', width=2, fill='#ffffff', stipple='gray12')
 
         def on_click(e):
             if state['p1'] is None:
                 state['p1'] = (e.x, e.y)
                 state['marker'] = canvas.create_oval(
                     e.x - 5, e.y - 5, e.x + 5, e.y + 5,
-                    fill='#4caf50', outline='#ffffff', width=2)
+                    fill='#22C55E', outline='#ffffff', width=2)
                 canvas.itemconfig(guide_id,
                     text="② 그리드 우하단 모서리를 클릭하세요   |   ESC: 취소")
             else:
@@ -545,7 +570,7 @@ class App(tk.Tk):
             self.region = region
             self.region_lbl.config(
                 text=f"({region[0]}, {region[1]})  {region[2]}×{region[3]}px",
-                fg='#a5d6a7')
+                fg=C['success'])
             self.start_btn.config(state='normal')
             self._log(f"영역 선택: x={region[0]} y={region[1]} {region[2]}×{region[3]}")
             self.after(100, self._preview_region)
@@ -575,11 +600,11 @@ class App(tk.Tk):
         draw = ImageDraw.Draw(shot)
         for i in range(1, cols):
             x = int(i * cell_w)
-            draw.line([(x, 0), (x, sh)], fill=(255, 60, 60), width=1)
+            draw.line([(x, 0), (x, sh)], fill=(37, 99, 235), width=1)
         for i in range(1, rows):
             y = int(i * cell_h)
-            draw.line([(0, y), (sw, y)], fill=(255, 60, 60), width=1)
-        draw.rectangle([(0,0),(sw-1,sh-1)], outline=(255,60,60), width=2)
+            draw.line([(0, y), (sw, y)], fill=(37, 99, 235), width=1)
+        draw.rectangle([(0, 0), (sw - 1, sh - 1)], outline=(37, 99, 235), width=2)
 
         cw = self.canvas.winfo_width()
         ch = self.canvas.winfo_height()
@@ -593,11 +618,11 @@ class App(tk.Tk):
         self.canvas._preview = img_tk
         self.canvas.delete('all')
         self._cell_ids = None
-        self.canvas.create_image(cw//2, ch//2, image=img_tk, anchor='center')
+        self.canvas.create_image(cw // 2, ch // 2, image=img_tk, anchor='center')
         self.canvas.create_text(
-            cw//2, ch//2 + dh//2 + 12,
+            cw // 2, ch // 2 + dh // 2 + 14,
             text=f"미리보기  {cols}열 × {rows}행  |  셀 구분선이 게임 칸과 일치하는지 확인하세요",
-            fill='#ff8a65', font=('Arial', 8))
+            fill=C['secondary'], font=(FONT, 8))
 
         self._log(f"미리보기: {cols}×{rows} 그리드")
 
@@ -766,10 +791,10 @@ class App(tk.Tk):
                 x1, y1 = c * cw_cell, r * ch_cell
                 x2, y2 = x1 + cw_cell, y1 + ch_cell
                 rid = self.canvas.create_rectangle(x1, y1, x2, y2,
-                          fill='#78909c', outline='#546e7a', width=1)
-                tid = self.canvas.create_text((x1+x2)/2, (y1+y2)/2,
-                          text='', fill='#ffffff',
-                          font=('Arial', fs, 'bold'))
+                          fill='#CBD5E1', outline='#E2E8F0', width=1)
+                tid = self.canvas.create_text((x1 + x2) / 2, (y1 + y2) / 2,
+                          text='', fill='#1F2937',
+                          font=(FONT, fs, 'bold'))
                 row_ids.append((rid, tid, None))
             ids.append(row_ids)
         self._cell_ids = ids
@@ -798,12 +823,12 @@ class App(tk.Tk):
 
                 if state in CELL_FILL:
                     fill = CELL_FILL[state]
-                    text = {FLAG:'F', MINE:'✕'}.get(state, '')
-                    tcolor = '#ffffff'
+                    text = {FLAG: 'F', MINE: 'X'}.get(state, '')
+                    tcolor = '#1F2937' if state == UNKNOWN or state == EMPTY else '#FFFFFF'
                 else:
-                    fill   = '#eceff1'
+                    fill   = '#FFFFFF'
                     text   = str(state)
-                    tcolor = NUM_COLOR.get(state, '#212121')
+                    tcolor = NUM_COLOR.get(state, '#1F2937')
 
                 self.canvas.itemconfig(rid, fill=fill)
                 self.canvas.itemconfig(tid, text=text, fill=tcolor)
